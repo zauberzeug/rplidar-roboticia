@@ -95,10 +95,12 @@ def _process_scan(raw):
 
 
 def _process_express_scan(data, new_angle, trame):
+    # trame counts the samples of a capsule from 1; like Slamtec's SDK, the
+    # first sample sits at the capsule's start angle
     new_scan = (new_angle < data.start_angle) & (trame == 1)
     angle = (data.start_angle + (
             (new_angle - data.start_angle) % 360
-            )/32*trame - data.angle[trame-1]) % 360
+            )/32*(trame-1) - data.angle[trame-1]) % 360
     distance = data.distance[trame-1]
     return new_scan, None, angle, distance
 
@@ -456,7 +458,6 @@ class ExpressPacket(namedtuple('express_packet',
                                'distance angle new_scan start_angle')):
     sync1 = 0xa
     sync2 = 0x5
-    sign = {0: 1, 1: -1}
 
     @classmethod
     def from_string(cls, data):
@@ -475,14 +476,15 @@ class ExpressPacket(namedtuple('express_packet',
         new_scan = packet[3] >> 7
         start_angle = (packet[2] + ((packet[3] & 0b01111111) << 8)) / 64
 
+        # the angle compensation is an unsigned 6 bit value in 1/8 degree, as
+        # Slamtec's SDK reads it (the protocol document calls the top bit a
+        # sign bit, which rotates every point by 2*angle - 4 degrees)
         d = a = ()
         for i in range(0,80,5):
             d += ((packet[i+4] >> 2) + (packet[i+5] << 6),)
             a += (((packet[i+8] & 0b00001111) + ((
-                    packet[i+4] & 0b00000001) << 4))/8*cls.sign[(
-                     packet[i+4] & 0b00000010) >> 1],)
+                    packet[i+4] & 0b00000011) << 4))/8,)
             d += ((packet[i+6] >> 2) + (packet[i+7] << 6),)
             a += (((packet[i+8] >> 4) + (
-                (packet[i+6] & 0b00000001) << 4))/8*cls.sign[(
-                    packet[i+6] & 0b00000010) >> 1],)
+                (packet[i+6] & 0b00000011) << 4))/8,)
         return cls(d, a, new_scan, start_angle)
